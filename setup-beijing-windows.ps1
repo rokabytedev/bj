@@ -14,9 +14,16 @@ if (-not $isAdmin) {
 Write-Host "== Running as admin, configuring ==" -ForegroundColor Green
 
 Write-Host "== [1/3] Scheduled task: start WSL at logon (systemd brings up tailscaled) ==" -ForegroundColor Cyan
-$action = 'wsl.exe -d Ubuntu -u root --exec /bin/sh -c "while true; do sleep 3600; done"'
-schtasks /create /tn "Beijing-WSL-Tailnet" /tr $action /sc onlogon /rl highest /f
-Write-Host "Scheduled task created (logon-triggered, keeps WSL VM alive)." -ForegroundColor Green
+# Use Register-ScheduledTask (not schtasks.exe) to avoid native-arg quoting issues.
+# Keepalive = 'sleep infinity' (no quotes/semicolons needed), which holds the WSL VM up.
+try {
+  $act = New-ScheduledTaskAction -Execute "wsl.exe" -Argument "-d Ubuntu -u root sleep infinity"
+  $trg = New-ScheduledTaskTrigger -AtLogOn
+  Register-ScheduledTask -TaskName "Beijing-WSL-Tailnet" -Action $act -Trigger $trg -Force -ErrorAction Stop | Out-Null
+  Write-Host "Scheduled task created (logon-triggered, keeps WSL VM alive)." -ForegroundColor Green
+} catch {
+  Write-Warning "Failed to create scheduled task: $_"
+}
 
 Write-Host "== [2/3] .wslconfig: keep WSL VM from idle-shutdown (written without BOM) ==" -ForegroundColor Cyan
 $wslcfg = Join-Path $env:USERPROFILE ".wslconfig"
@@ -31,6 +38,11 @@ try {
   powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
   powercfg /setactive SCHEME_CURRENT
 } catch { Write-Warning "lid setting failed (alias unknown on some models); set 'do nothing on lid close' in GUI, ignore" }
+
+Write-Host "`n== Verify scheduled task ==" -ForegroundColor Cyan
+$t = Get-ScheduledTask -TaskName "Beijing-WSL-Tailnet" -ErrorAction SilentlyContinue
+if ($t) { Write-Host ("Verify OK: task '{0}' state={1}" -f $t.TaskName, $t.State) -ForegroundColor Green }
+else { Write-Warning "Verify FAILED: scheduled task not found" }
 
 Write-Host "`nDone. Manual items: 1) install WSL  2) (recommended) enable auto-logon (netplwiz)  3) RustDesk optional." -ForegroundColor Yellow
 Write-Host "Next: WSL step 5 (join tailnet) - ask Claude for the 1-hour preauth key." -ForegroundColor Yellow
