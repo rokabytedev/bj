@@ -13,14 +13,17 @@ if (-not $isAdmin) {
 }
 Write-Host "== Running as admin, configuring ==" -ForegroundColor Green
 
-Write-Host "== [1/3] Scheduled task: start WSL at logon (systemd brings up tailscaled) ==" -ForegroundColor Cyan
-# Use Register-ScheduledTask (not schtasks.exe) to avoid native-arg quoting issues.
-# Keepalive = 'sleep infinity' (no quotes/semicolons needed), which holds the WSL VM up.
+Write-Host "== [1/3] Scheduled task: start WSL AT BOOT, no login required (systemd brings up tailscaled) ==" -ForegroundColor Cyan
+# Trigger=AtStartup + S4U principal => runs whether the user is logged on or not, no stored password,
+# no auto-login needed. Matches hilo's 'WSL/SSH comes up after reboot without logging in' behavior.
+# Keepalive = 'sleep infinity' holds the WSL VM up. ExecutionTimeLimit=0 => never auto-killed.
 try {
-  $act = New-ScheduledTaskAction -Execute "wsl.exe" -Argument "-d Ubuntu -u root sleep infinity"
-  $trg = New-ScheduledTaskTrigger -AtLogOn
-  Register-ScheduledTask -TaskName "Beijing-WSL-Tailnet" -Action $act -Trigger $trg -Force -ErrorAction Stop | Out-Null
-  Write-Host "Scheduled task created (logon-triggered, keeps WSL VM alive)." -ForegroundColor Green
+  $act  = New-ScheduledTaskAction -Execute "wsl.exe" -Argument "-d Ubuntu -u root sleep infinity"
+  $trg  = New-ScheduledTaskTrigger -AtStartup
+  $prin = New-ScheduledTaskPrincipal -UserId "$env:USERNAME" -LogonType S4U -RunLevel Highest
+  $set  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero)
+  Register-ScheduledTask -TaskName "Beijing-WSL-Tailnet" -Action $act -Trigger $trg -Principal $prin -Settings $set -Force -ErrorAction Stop | Out-Null
+  Write-Host "Scheduled task created (boot-triggered, runs without login, keeps WSL VM alive)." -ForegroundColor Green
 } catch {
   Write-Warning "Failed to create scheduled task: $_"
 }
