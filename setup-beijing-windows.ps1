@@ -1,33 +1,36 @@
-# setup-beijing-windows.ps1 — 北京新机基础开机自启(可靠性放宽:父母可重启兜底)。
-# 用法:普通或管理员 PowerShell 均可——非管理员会自动弹 UAC 提权后重跑。
-$ErrorActionPreference = "Continue"   # 单项失败不中断,保证关键任务先落地
+# setup-beijing-windows.ps1 - Beijing exit-node basic autostart.
+# ASCII-only on purpose: Windows PowerShell 5.1 on a Chinese-locale system reads .ps1 as GBK,
+# so any non-ASCII (Chinese) comment/string would become mojibake and break the parser.
+# Run from a normal PowerShell; it will self-elevate via UAC if not already admin.
+$ErrorActionPreference = "Continue"   # don't stop on a single failure; land the critical task first
 
-# 自提权:若当前不是管理员,弹 UAC 以管理员身份重新运行本脚本后退出。
+# Self-elevate: if not admin, relaunch this script elevated via UAC, then exit.
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
-  Write-Host "需要管理员权限,正在弹出 UAC 重新以管理员运行(请点'是')..." -ForegroundColor Yellow
+  Write-Host "Need admin rights. Relaunching via UAC (click Yes)..." -ForegroundColor Yellow
   Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
   exit
 }
-Write-Host "== 已是管理员,开始配置 ==" -ForegroundColor Green
+Write-Host "== Running as admin, configuring ==" -ForegroundColor Green
 
-Write-Host "== [1/3] 关键:登录时自动拉起 WSL(让 systemd 带起 tailscaled) ==" -ForegroundColor Cyan
+Write-Host "== [1/3] Scheduled task: start WSL at logon (systemd brings up tailscaled) ==" -ForegroundColor Cyan
 $action = 'wsl.exe -d Ubuntu -u root --exec /bin/sh -c "while true; do sleep 3600; done"'
 schtasks /create /tn "Beijing-WSL-Tailnet" /tr $action /sc onlogon /rl highest /f
-Write-Host "计划任务已创建(登录触发,保活 WSL 虚拟机)。" -ForegroundColor Green
+Write-Host "Scheduled task created (logon-triggered, keeps WSL VM alive)." -ForegroundColor Green
 
-Write-Host "== [2/3] .wslconfig:不让 WSL 空闲回收(无 BOM 写入) ==" -ForegroundColor Cyan
+Write-Host "== [2/3] .wslconfig: keep WSL VM from idle-shutdown (written without BOM) ==" -ForegroundColor Cyan
 $wslcfg = Join-Path $env:USERPROFILE ".wslconfig"
 [System.IO.File]::WriteAllText($wslcfg, "[wsl2]`nvmIdleTimeout=-1`n", (New-Object System.Text.UTF8Encoding($false)))
-Write-Host "已写 $wslcfg"
+Write-Host "Wrote $wslcfg"
 
-Write-Host "== [3/3] 电源:插电永不睡/不休眠/关快速启动/合盖不操作(容错) ==" -ForegroundColor Cyan
-try { powercfg /change standby-timeout-ac 0 } catch { Write-Warning "standby 设置失败,忽略" }
+Write-Host "== [3/3] Power: never sleep/hibernate on AC, disable fast startup, lid=do nothing (best-effort) ==" -ForegroundColor Cyan
+try { powercfg /change standby-timeout-ac 0 } catch { Write-Warning "standby setting failed, ignore" }
 try { powercfg /change hibernate-timeout-ac 0 } catch {}
-try { powercfg /h off } catch { Write-Warning "关休眠失败,忽略" }
+try { powercfg /h off } catch { Write-Warning "disable hibernate/fast-startup failed, ignore" }
 try {
   powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
   powercfg /setactive SCHEME_CURRENT
-} catch { Write-Warning "合盖设置失败(部分机型别名不认),可在 GUI 设'合盖不操作',忽略" }
+} catch { Write-Warning "lid setting failed (alias unknown on some models); set 'do nothing on lid close' in GUI, ignore" }
 
-Write-Host "`n手动项见清单:① 装 WSL 本体 ② 建议开自动登录(重启后免人工登录) ③ RustDesk 可选。" -ForegroundColor Yellow
+Write-Host "`nDone. Manual items: 1) install WSL  2) (recommended) enable auto-logon (netplwiz)  3) RustDesk optional." -ForegroundColor Yellow
+Write-Host "Next: WSL step 5 (join tailnet) - ask Claude for the 1-hour preauth key." -ForegroundColor Yellow
