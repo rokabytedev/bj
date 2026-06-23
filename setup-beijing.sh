@@ -13,7 +13,7 @@ say(){ echo -e "\n\033[1;36m[setup-beijing] $*\033[0m"; }
 die(){ echo -e "\n\033[1;31m[setup-beijing][FATAL] $*\033[0m" >&2; exit 1; }
 
 # 0. 前置
-[ -n "${PREAUTH_KEY:-}" ] || die "缺少 PREAUTH_KEY。用法: PREAUTH_KEY='hskey-...' bash setup-beijing.sh"
+# PREAUTH_KEY 可选:给了就用它直接入网;没给则走"交互注册"(脚本会打印一行 nodekey 让你截图发回)。
 [ "$(id -u)" -ne 0 ] || die "请用普通用户运行(脚本按需 sudo),勿直接 root。"
 command -v sudo >/dev/null || die "没有 sudo。"
 grep -qi microsoft /proc/version 2>/dev/null || say "提醒:似乎不在 WSL,继续。"
@@ -59,14 +59,20 @@ sudo sshd -t || die "sshd 配置语法错误"
 sudo systemctl enable ssh 2>/dev/null || sudo systemctl enable sshd
 sudo systemctl restart ssh 2>/dev/null || sudo systemctl restart sshd
 
-# 6. 入网+宣告出口(幂等:已 Running 跳过 up,避免过期 key 卡二次运行)
+# 6. 入网+宣告出口(幂等:已 Running 跳过 up,避免重复)
 if tailscale status --json 2>/dev/null | grep -q '"BackendState": *"Running"'; then
   say "tailscale 已 Running,跳过 up(幂等)"
-else
-  say "加入 Headscale 并宣告出口"
+elif [ -n "${PREAUTH_KEY:-}" ]; then
+  say "用 PREAUTH_KEY 直接入网并宣告出口"
   sudo tailscale up --login-server="$HEADSCALE_URL" --advertise-exit-node \
     --ssh=false --accept-dns=false --hostname="$NODE_HOSTNAME" \
     --authkey="$PREAUTH_KEY" --reset || die "tailscale up 失败(key 过期? 能否连 VPS:443?)"
+else
+  say "===== 交互注册:不用你输入任何东西 ====="
+  say "下面 tailscale 会打印一行带 nodekey 的地址(形如 .../register/nodekey:xxxx)。"
+  say "★ 把那一行【截图】发给 Claude —— 它在服务器上注册后,本命令会自动继续,不要关窗口。"
+  sudo tailscale up --login-server="$HEADSCALE_URL" --advertise-exit-node \
+    --ssh=false --accept-dns=false --hostname="$NODE_HOSTNAME" --reset || die "tailscale up 失败(能否连 VPS:443?)"
 fi
 # 把"宣告出口"作为持久 pref 落地(无 --reset 副作用),保证跨重启稳定
 sudo tailscale set --advertise-exit-node 2>/dev/null || true
