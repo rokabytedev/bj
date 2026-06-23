@@ -1,5 +1,15 @@
-# setup-beijing-windows.ps1 — 北京新机【管理员 PowerShell】运行。基础开机自启(可靠性放宽:父母可重启兜底)。
+# setup-beijing-windows.ps1 — 北京新机基础开机自启(可靠性放宽:父母可重启兜底)。
+# 用法:普通或管理员 PowerShell 均可——非管理员会自动弹 UAC 提权后重跑。
 $ErrorActionPreference = "Continue"   # 单项失败不中断,保证关键任务先落地
+
+# 自提权:若当前不是管理员,弹 UAC 以管理员身份重新运行本脚本后退出。
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+  Write-Host "需要管理员权限,正在弹出 UAC 重新以管理员运行(请点'是')..." -ForegroundColor Yellow
+  Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
+  exit
+}
+Write-Host "== 已是管理员,开始配置 ==" -ForegroundColor Green
 
 Write-Host "== [1/3] 关键:登录时自动拉起 WSL(让 systemd 带起 tailscaled) ==" -ForegroundColor Cyan
 $action = 'wsl.exe -d Ubuntu -u root --exec /bin/sh -c "while true; do sleep 3600; done"'
